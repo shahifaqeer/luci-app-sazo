@@ -19,7 +19,7 @@ define Package/luci-app-sazo
   CATEGORY:=LuCI
   DEFAULT:=y
 TITLE:=SAZO
-  URL:=http://github.com/shahifaqeer/bismark-packages
+  URL:=http://github.com/shahifaqeer/luci-app-sazo
   SUBMENU:=1. Applications
   DEPENDS:=+lua +libuci-lua +libubus-lua
 endef

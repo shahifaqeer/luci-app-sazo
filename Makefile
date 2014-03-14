@@ -42,6 +42,8 @@ define Package/luci-app-sazo/install
 	$(CP) ./files/usr/lib/lua/luci/controller/bismark/sazo.lua $(1)/usr/lib/lua/luci/controller/bismark/sazo.lua
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/model/cbi/sazo
 	$(CP) ./files/usr/lib/lua/luci/model/cbi/sazo/general.lua $(1)/usr/lib/lua/luci/model/cbi/sazo/general.lua
+	$(INSTALL_DIR) $(1)/usr/bin
+	$(CP) ./files/usr/bin/setup-sazo-config $(1)/usr/bin/setup-sazo-config
 endef
 
 define Package/luci-app-sazo/postinst

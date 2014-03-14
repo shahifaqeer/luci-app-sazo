@@ -1,0 +1,240 @@
+#!/usr/bin/env lua
+
+-- this script gets executed when
+-- I commit sazo page
+
+-- STEP 1: if sazo-conf is empty
+--	ARP -> /etc/config/sazo-conf
+--	sazo-status -> sazo-conf
+--	save backup in /var/sazo/sazo-conf
+
+-- STEP 2: read sazo-conf
+-- for redirect => stop/start redirection sazo.sh
+-- add devices from ARP with redirect = 0
+
+
+local io     = require "io"
+local os     = require "os"
+local table  = require "table"
+local nixio  = require "nixio"
+local fs     = require "nixio.fs"
+local uci    = require "luci.model.uci"
+local string = require "string"
+
+local luci   = {}
+luci.util    = require "luci.util"
+luci.ip      = require "luci.ip"
+luci.sys     = require "luci.sys"
+
+local tonumber, ipairs, pairs, pcall, type, next, setmetatable, require, select =
+        tonumber, ipairs, pairs, pcall, type, next, setmetatable, require, select
+        
+SAZO_CONFIG = "/etc/config/sazo-conf"
+
+function call(...)
+        return os.execute(...) / 256
+end
+
+exec = luci.util.exec
+
+
+function arptable(callback)
+    local arp, e, r, v
+    if fs.access("/proc/net/arp") then
+        for e in io.lines("/proc/net/arp") do
+            local r = { }, v
+            for v in e:gmatch("%S+") do
+                r[#r+1] = v
+            end
+            if r[1] ~= "IP" then
+                local x = {
+                    ["ip_address"] = r[1],
+                    ["HW Type"]    = r[2],
+                    ["Flags"]      = r[3],
+                    ["mac_address"] = r[4],
+                    ["Mask"]       = r[5],
+                    ["device_interface"]     = r[6],
+                }
+
+                if callback then
+                    callback(x)
+                else
+                    arp = arp or { }
+                    arp[#arp+1] = x
+                end
+            end
+        end
+    end
+    return arp
+end
+
+function read_sazo_config(callback)
+    local conf = { }
+    if fs.access(SAZO_CONFIG) then
+	local num_device = 0
+	local options = { }
+        for e in io.lines(SAZO_CONFIG) do
+	    local r = { }, v
+	    
+	    for v in e:gmatch("%S+") do
+	    	r[#r+1] = v
+	    end	    	
+	    
+            if r[2] == "device" then
+	        if num_device > 0 then
+	            conf[num_device] = options
+		    --print("num_device " .. num_device)
+	        end
+	        num_device=num_device+1
+	        options = { }
+	    end
+	         
+	    if r[1] == "option" then
+	        options[r[2]] = r[3]
+	    	--print("options ".. r[2] .." ".. r[3])
+	    end
+	    
+	    if callbeack then
+	        callback(options)
+	    end
+	    
+	end
+	if num_device > 0 then
+	    conf[num_device] = options
+	    --print("num_device " .. num_device)
+	end
+    end
+    return conf
+end
+
+
+function read_sazo_show()
+    local sazo_addr = { }
+    local sazo_show = luci.util.exec('/usr/sbin/sazo.sh show')
+    sazo_show = string.lower(sazo_show)
+    for v in sazo_show:gmatch("%S+") do
+    	sazo_addr[#sazo_addr+1] = v
+    end	    	
+     
+    return sazo_addr
+end
+
+
+function redirect_sazo(callback)
+    local arp = arptable()
+    local config = read_sazo_config()
+    local sazo_show = read_sazo_show()
+    
+    for num_device, options in pairs(config) do
+    	print("num_device " .. num_device)
+    	print("redirect " .. options["redirect"])
+    	print("mac_address " .. options["mac_address"])
+    	
+    	if options["redirect"] == '1' then
+    	--  this is not working
+    	--  print("SAZO_SHOW BEFORE "..to_string(read_sazo_show()))
+    	--  if table_contains(read_sazo_show(), options["mac_address"]) == false then
+     	        print("REDIRECT MAC ADDRESS "..options["mac_address"])
+    	        os.execute('/usr/sbin/sazo.sh rdrct start '..options["mac_address"])
+    	--  end
+	--  print("SAZO_SHOW AFTER "..to_string(read_sazo_show()))
+    	else
+    	-- this is working!
+	--  print("SAZO_SHOW BEFORE "..to_string(read_sazo_show()))
+    	--  if table_contains(read_sazo_show(), options["mac_address"]) == true then
+	    	print("DONT REDIRECT MAC ADDRESS "..options["mac_address"])
+	    	os.execute('/usr/sbin/sazo.sh rdrct stop '..options["mac_address"])
+	--  end
+	--  print("SAZO_SHOW AFTER "..to_string(read_sazo_show()))
+    	end
+    end
+end
+
+function table_contains(table, element)
+    for _, value in pairs(table) do
+	if value == element then
+            return true
+        end
+    end
+    return false
+end
+
+function table_print (tt, indent, done)
+  done = done or {}
+  indent = indent or 0
+  if type(tt) == "table" then
+    local sb = {}
+    for key, value in pairs (tt) do
+      table.insert(sb, string.rep (" ", indent)) -- indent it
+      if type (value) == "table" and not done [value] then
+        done [value] = true
+        table.insert(sb, "{\n");
+        table.insert(sb, table_print (value, indent + 2, done))
+        table.insert(sb, string.rep (" ", indent)) -- indent it
+        table.insert(sb, "}\n");
+      elseif "number" == type(key) then
+        table.insert(sb, string.format("\"%s\"\n", tostring(value)))
+      else
+        table.insert(sb, string.format(
+            "%s = \"%s\"\n", tostring (key), tostring(value)))
+       end
+    end
+    return table.concat(sb)
+  else
+    return tt .. "\n"
+  end
+end
+
+function to_string( tbl )
+    if  "nil"       == type( tbl ) then
+        return tostring(nil)
+    elseif  "table" == type( tbl ) then
+        return table_print(tbl)
+    elseif  "string" == type( tbl ) then
+        return tbl
+    else
+        return tostring(tbl)
+    end
+end
+
+function save_arp_to_conf()
+    local arp = arptable()
+    local sazo_show = read_sazo_show()
+    luci.util.exec('echo "\n" > ' .. SAZO_CONFIG)
+    
+    for key, value in pairs(arp) do
+        if value["device_interface"] == 'br-lan' then
+            luci.util.exec('echo "config device" >> ' .. SAZO_CONFIG)
+	    local redirect = '0'
+            if table_contains(sazo_show, value["mac_address"]) == true then
+                redirect = '1'
+            end
+            luci.util.exec('echo "\toption redirect "'.. redirect ..' >> ' .. SAZO_CONFIG)
+            luci.util.exec('echo "\toption ip_address "'.. value["ip_address"] ..' >> ' .. SAZO_CONFIG)
+            luci.util.exec('echo "\toption mac_address "'.. value["mac_address"] ..' >> ' .. SAZO_CONFIG)
+            luci.util.exec('echo "\toption available 1" >> '.. SAZO_CONFIG)
+            luci.util.exec('echo "\toption required 0" >> '..SAZO_CONFIG)
+        end
+    end
+end
+
+
+-- local conf = read_sazo_config()
+-- local sazo_addr = read_sazo_show()
+-- print(to_string(sazo_addr))
+-- print(to_string(conf))
+-- print(to_string(arptable()))
+-- redirect_sazo()
+-- save_arp_to_conf()
+
+
+function main(arg)
+    -- need a separate process to set val in config whenever redirection does start
+    -- based on new config redirect sazo
+    redirect_sazo()
+    -- update sazo's arp table after redirection
+    save_arp_to_conf()
+end
+
+return main()
+    
